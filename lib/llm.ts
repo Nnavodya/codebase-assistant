@@ -2,8 +2,15 @@ import type { SearchHit } from "./vectorStore";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-// You can change the model in .env.local with GROQ_MODEL=...
-const MODEL = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
+// Models are tried in this order. If one is not available (404), the next one is used.
+// You can put your own first choice in .env.local, for example: GROQ_MODEL=openai/gpt-oss-20b
+const MODELS = [
+  process.env.GROQ_MODEL,
+  "openai/gpt-oss-20b",
+  "openai/gpt-oss-120b",
+  "llama-3.1-8b-instant",
+  "llama-3.3-70b-versatile",
+].filter((m): m is string => Boolean(m));
 
 const SYSTEM_PROMPT = `You are an expert code assistant that helps developers understand a GitHub repository.
 
@@ -30,35 +37,54 @@ export async function askLLM(question: string, hits: SearchHit[]): Promise<strin
   }
 
   const userMessage = `Code context from the repository:\n\n${buildContext(hits)}\n\n---\nQuestion: ${question}`;
+  const triedModels: string[] = [];
 
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.2,
-      max_tokens: 700,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-    }),
-  });
+  for (const model of MODELS) {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        max_tokens: 1500, // some models use part of this for thinking, so keep it high
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userMessage },
+        ],
+      }),
+    });
 
-  if (!res.ok) {
+    // Model not available for this account: try the next one
+    if (res.status === 404) {
+      triedModels.push(model);
+      continue;
+    }
+
     if (res.status === 429) {
       throw new Error("Groq rate limit reached. Please wait a minute and try again.");
     }
     if (res.status === 401) {
       throw new Error("Groq API key is invalid. Check GROQ_API_KEY in .env.local.");
     }
-    const text = await res.text();
-    throw new Error(`Groq error ${res.status}: ${text.slice(0, 300)}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Groq error ${res.status} (model ${model}): ${text.slice(0, 300)}`);
+    }
+
+    const data = await res.json();
+    const answer: string = data.choices?.[0]?.message?.content ?? "";
+    if (!answer.trim()) {
+      throw new Error(`Model ${model} returned an empty answer. Please try again.`);
+    }
+    console.log(`Answered with Groq model: ${model}`);
+    return answer;
   }
 
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content ?? "No answer was returned.";
+  throw new Error(
+    `None of these Groq models are available for your account: ${triedModels.join(", ")}. ` +
+      `Open console.groq.com/docs/models, pick a model you can use, and set GROQ_MODEL=<model name> in .env.local.`
+  );
 }
