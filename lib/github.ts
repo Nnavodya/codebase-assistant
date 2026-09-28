@@ -6,7 +6,7 @@ const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const SKIP_DIRS = [
   "node_modules", ".git", "dist", "build", ".next", "coverage", "vendor", "__pycache__",
 ];
-const SKIP_FILES = ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"];
+const SKIP_FILES = ["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "AGENTS.md", "CLAUDE.md"];
 
 // Only these file types are useful for code questions
 const ALLOWED_EXTENSIONS = [
