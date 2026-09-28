@@ -2,18 +2,22 @@
 
 import { useState } from "react";
 
-type SearchResult = {
+type Source = {
   id: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
   score: number;
-  preview: string;
+  url: string;
 };
 
-type SearchResponse = {
-  question: string;
-  files: number;
-  chunks: number;
+type AskResponse = {
+  answer: string;
+  fromCache: boolean;
   seconds: number;
-  results: SearchResult[];
+  chunks: number;
+  files: number;
+  sources: Source[];
   error?: string;
 };
 
@@ -22,9 +26,9 @@ export default function Home() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [data, setData] = useState<SearchResponse | null>(null);
+  const [data, setData] = useState<AskResponse | null>(null);
 
-  async function handleSearch() {
+  async function handleAsk() {
     if (!repoUrl.trim() || !question.trim()) {
       setError("Please enter both a GitHub repo URL and a question.");
       return;
@@ -35,12 +39,15 @@ export default function Home() {
     setData(null);
 
     try {
-      const params = new URLSearchParams({
-        repo: repoUrl.trim().replace(/\.git$/, ""),
-        q: question.trim(),
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repo: repoUrl.trim().replace(/\.git$/, ""),
+          question: question.trim(),
+        }),
       });
-      const res = await fetch(`/api/test-search?${params.toString()}`);
-      const json: SearchResponse = await res.json();
+      const json: AskResponse = await res.json();
 
       if (!res.ok || json.error) {
         setError(json.error ?? "Something went wrong.");
@@ -80,7 +87,7 @@ export default function Home() {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !loading) handleSearch();
+              if (e.key === "Enter" && !loading) handleAsk();
             }}
             placeholder="Where is JWT authentication?"
             className="w-full rounded-lg border border-gray-400 bg-transparent px-3 py-2 outline-none focus:border-blue-500"
@@ -88,11 +95,11 @@ export default function Home() {
         </div>
 
         <button
-          onClick={handleSearch}
+          onClick={handleAsk}
           disabled={loading}
           className="rounded-lg bg-blue-600 px-5 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {loading ? "Searching... (first run can take a minute)" : "Search"}
+          {loading ? "Thinking... (first time for a repo can take a minute or two)" : "Ask"}
         </button>
       </div>
 
@@ -104,23 +111,33 @@ export default function Home() {
 
       {data && (
         <section className="mt-8">
-          <p className="mb-4 text-sm opacity-70">
+          <h2 className="mb-2 text-lg font-semibold">Answer</h2>
+          <div className="whitespace-pre-wrap rounded-lg border border-blue-500 bg-blue-500/5 p-4 text-sm leading-relaxed">
+            {data.answer}
+          </div>
+
+          <p className="mt-2 text-xs opacity-60">
             Searched {data.chunks} chunks from {data.files} files in {data.seconds}s
+            {data.fromCache ? " (using saved index)" : " (new index created)"}
           </p>
 
-          <div className="space-y-4">
-            {data.results.map((r) => (
-              <div key={r.id} className="rounded-lg border border-gray-400 p-4">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <code className="break-all text-sm font-semibold">{r.id}</code>
-                  <span className="shrink-0 rounded bg-blue-600/20 px-2 py-0.5 text-xs">
-                    score {r.score}
-                  </span>
-                </div>
-                <pre className="overflow-x-auto whitespace-pre-wrap text-xs opacity-80">
-                  {r.preview}
-                </pre>
-              </div>
+          <h2 className="mb-2 mt-6 text-lg font-semibold">Sources</h2>
+          <div className="space-y-2">
+            {data.sources.map((s) => (
+              <a
+                key={s.id}
+                href={s.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-between gap-3 rounded-lg border border-gray-400 px-3 py-2 text-sm hover:border-blue-500"
+              >
+                <code className="break-all">
+                  {s.filePath}:{s.startLine}-{s.endLine}
+                </code>
+                <span className="shrink-0 rounded bg-blue-600/20 px-2 py-0.5 text-xs">
+                  score {s.score}
+                </span>
+              </a>
             ))}
           </div>
         </section>
