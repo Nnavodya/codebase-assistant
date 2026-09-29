@@ -4,6 +4,52 @@ import { fetchRepoFiles, parseRepoUrl } from "./github";
 import { chunkFiles, type CodeChunk } from "./chunker";
 import { embedTexts, embedText, cosineSimilarity } from "./embeddings";
 
+const STOPWORDS = new Set([
+  "the", "is", "a", "an", "of", "in", "on", "at", "to", "for", "and", "or",
+  "this", "what", "where", "how", "are", "does", "do", "it", "with", "was",
+  "repository", "repo", "code", "file", "project",
+]);
+
+// Split text into lowercase words, dropping common stopwords
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 1 && !STOPWORDS.has(w));
+}
+
+// How much of the question's meaningful words appear in this chunk (0 to 1)
+function keywordOverlap(questionWords: string[], chunk: CodeChunk): number {
+  if (questionWords.length === 0) return 0;
+
+  const haystack = tokenize(`${chunk.filePath} ${chunk.content}`);
+  const haystackSet = new Set(haystack);
+
+  let matches = 0;
+  for (const word of questionWords) {
+    if (haystackSet.has(word)) matches++;
+    // Extra credit if the word appears in the file NAME itself (strong signal)
+    else if (chunk.filePath.toLowerCase().includes(word)) matches += 0.5;
+  }
+
+  return Math.min(matches / questionWords.length, 1);
+}
+
+// Documentation files describe intentions; code files prove what is actually built.
+// Slightly trust code more when ranking results.
+// Words that signal the user wants to see actual implementation, not a description
+const IMPLEMENTATION_SIGNALS = [
+  "implement", "implemented", "implementation", "where", "how",
+  "function", "code", "logic", "handle", "handles", "route", "endpoint",
+];
+
+// Documentation files describe intentions; code files prove what is actually built.
+// Only trust code more when the question is clearly asking about implementation.
+function languageWeight(language: string, questionWords: string[]): number {
+  const isImplementationQuestion = questionWords.some((w) => IMPLEMENTATION_SIGNALS.includes(w));
+  if (language === "markdown" && isImplementationQuestion) return 0.5;
+  return 1.0;
+}
 export type RepoIndex = {
   repoUrl: string;
   owner: string;
@@ -94,12 +140,17 @@ export async function searchIndex(
   topK = 5
 ): Promise<SearchHit[]> {
   const questionVector = await embedText(question);
+  const questionWords = tokenize(question);
 
-  return index.chunks
-    .map((chunk, i) => ({
-      chunk,
-      score: cosineSimilarity(questionVector, index.vectors[i]),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
+  const scored = index.chunks.map((chunk, i) => {
+    const vectorScore = cosineSimilarity(questionVector, index.vectors[i]);
+    const keywordScore = keywordOverlap(questionWords, chunk);
+
+    // Meaning match matters most, keyword overlap adds precision,
+    // and code files are trusted slightly more than documentation.
+    const combined = (vectorScore * 0.7 + keywordScore * 0.3) * languageWeight(chunk.language, questionWords);
+    return { chunk, score: combined };
+  });
+
+  return scored.sort((a, b) => b.score - a.score).slice(0, topK);
 }
