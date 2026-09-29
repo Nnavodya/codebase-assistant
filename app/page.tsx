@@ -74,7 +74,8 @@ export default function Home() {
   const [docsLoading, setDocsLoading] = useState(false);
   const [docsError, setDocsError] = useState("");
   const [docsData, setDocsData] = useState<DocsResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [answerCopied, setAnswerCopied] = useState(false);
+  const [docsCopied, setDocsCopied] = useState(false);
 
   const cleanRepo = () => repoUrl.trim().replace(/\.git$/, "");
 
@@ -176,7 +177,7 @@ export default function Home() {
     setDocsLoading(true);
     setDocsError("");
     setDocsData(null);
-    setCopied(false);
+    setDocsCopied(false);
 
     try {
       const res = await fetch("/api/docs", {
@@ -198,12 +199,23 @@ export default function Home() {
     }
   }
 
+    async function handleCopyAnswer() {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(data.answer);
+      setAnswerCopied(true);
+      setTimeout(() => setAnswerCopied(false), 2000);
+    } catch {
+      setError("Could not copy. Please select the text and copy it manually.");
+    }
+  }
+
   async function handleCopyDocs() {
     if (!docsData) return;
     try {
       await navigator.clipboard.writeText(docsData.markdown);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setDocsCopied(true);
+      setTimeout(() => setDocsCopied(false), 2000);
     } catch {
       setDocsError("Could not copy. Please select the text and copy it manually.");
     }
@@ -264,7 +276,12 @@ export default function Home() {
 
         {data && (
           <div className="mt-6">
-            <h3 className="mb-2 font-semibold">Answer</h3>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h3 className="font-semibold">Answer</h3>
+              <button onClick={handleCopyAnswer} className={secondaryButtonClass}>
+                {answerCopied ? "Copied!" : "Copy answer"}
+              </button>
+            </div>
             <div className={resultBoxClass}>
               <Markdown>{data.answer}</Markdown>
             </div>
@@ -381,7 +398,7 @@ export default function Home() {
               </span>
               <div className="flex gap-2">
                 <button onClick={handleCopyDocs} className={secondaryButtonClass}>
-                  {copied ? "Copied!" : "Copy markdown"}
+                  {docsCopied ? "Copied!" : "Copy markdown"}
                 </button>
                 <button onClick={handleDownloadDocs} className={secondaryButtonClass}>
                   Download .md
